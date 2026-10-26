@@ -15,10 +15,23 @@ LangGraph agents build on this base.
 | Pharos pull (one target family, resumable; queries verified against the live API, Pharos 3.19) | done |
 | KGX export with Biolink categories, predicates, provenance | done |
 | Structural validator (domain/range, dangling edges, provenance) | done |
-| Leakage-safe split, degree-matched negatives | done |
+| Leakage-safe split, degree-proportional negatives | done |
 | CPU baseline (ligand overlap, PPI, pathway features) | done |
 | Enrichment (Open Targets, OptimusKG, ChEMBL, Monarch) | next |
 | Pruning agent, explanations, UI, Brev Launchable | planned |
+
+## Results so far (Pharos 3.19, all 635 kinases)
+
+| | |
+| --- | --- |
+| Graph | 76,577 nodes, 198,362 edges; validator: 0 errors |
+| Chemical-protein pairs | 80,909 (64,727 train, 8,090 val, 8,092 test) |
+| Baseline AUROC, degree-matched negatives | 0.709 (degree-only check: 0.512) |
+| Baseline AUROC, random negatives | 0.941 (degree-only check: 0.911) |
+| Hits@10 / MRR, 1 positive vs 99 hard negatives | 0.514 / 0.327 |
+
+Random negatives let a degree-only score reach 0.91, which is why the
+degree-matched numbers are the headline.
 
 ## Quickstart
 
@@ -57,7 +70,7 @@ only; no network needed.
 - **Lineage on every edge.** `primary_knowledge_source` and `aggregator_knowledge_source` (infores CURIEs), `knowledge_level`, `agent_type`, `publications`, `source_version`, `ingest_run`, and `supporting_sources`.
 - **Activities scoped to their target.** Pharos can return a ligand's activities against other targets; the pull keeps only the parent target's.
 - **Drug indications are not gene-disease evidence.** Pharos lists DrugCentral indications among disease associations; they are excluded from `gene_associated_with_condition`.
-- **Fair evaluation.** Held-out pairs are removed from the training graph under every predicate and both directions. Negatives are type-constrained and degree-matched; a degree-only score is reported as a check and should sit near 0.5.
+- **Fair evaluation.** Held-out pairs are removed from the training graph under every predicate and both directions. Negatives are type-constrained and drawn in proportion to protein degree; a degree-only score is reported as a check and should sit near 0.5.
 - **Sampled ranking.** Hits@10 and MRR rank each test positive against 99 degree-matched negatives.
 
 See [docs/schema.md](docs/schema.md) for every class and predicate used.
