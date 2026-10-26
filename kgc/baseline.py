@@ -28,8 +28,9 @@ FEATURES = ["jac_max", "jac_mean", "ppi_count", "pw_max", "log_deg_c", "log_deg_
 class PairFeaturizer:
     def __init__(self, train_edges, task_predicate=B.INTERACTS_PHYS):
         task = train_edges[train_edges["predicate"] == task_predicate]
-        self.prot = sorted(set(task["object"]) | set(
-            train_edges.loc[train_edges["predicate"] == B.PPI, ["subject", "object"]].values.ravel()))
+        # Only proteins with known ligands: keeps the dense P x P matrices small
+        # (the full PPI neighbourhood has ~10k proteins and would not fit in RAM).
+        self.prot = sorted(set(task["object"]))
         self.pidx = {p: i for i, p in enumerate(self.prot)}
         chems = sorted(set(task["subject"]))
         cidx = {c: i for i, c in enumerate(chems)}

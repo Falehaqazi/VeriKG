@@ -31,38 +31,30 @@ def audit_leakage(edges, heldout_pairs):
     return edges.loc[~hit].copy(), removed
 
 
-def _degree_bins(degree, n_bins=10):
-    """Assign each protein to a quantile bin of log-degree."""
-    vals = np.log1p(np.array(list(degree.values()), dtype=float))
-    edges_ = np.unique(np.quantile(vals, np.linspace(0, 1, n_bins + 1)))
-    bins = {}
-    for k, v in degree.items():
-        bins[k] = int(np.searchsorted(edges_, np.log1p(v), side="right"))
-    return bins
-
-
 def sample_negatives(pos, candidates, known, degree, k, rng, matched=True):
     """For each positive (s, o), draw k corrupted objects o' never linked to s.
 
+    matched=True draws o' with probability proportional to its training degree,
+    so negatives have the same degree distribution as positives and a
+    degree-only score cannot separate them. matched=False draws uniformly.
     Returns (positive_index, subject, negative_object) triples.
     """
-    bins = _degree_bins(degree) if matched else None
-    by_bin = {}
-    if matched:
-        for c in candidates:
-            by_bin.setdefault(bins.get(c, 0), []).append(c)
     cand_all = np.array(candidates)
+    if matched:
+        w = np.array([degree.get(c, 0) for c in candidates], dtype=float) + 0.5
+        w /= w.sum()
     rows = []
     for i, (s, o) in enumerate(pos):
-        pool = np.array(by_bin.get(bins.get(o, 0), candidates)) if matched else cand_all
-        if len(pool) < 2 * k:  # small bin: fall back to all candidates
-            pool = cand_all
         picked, tries = [], 0
         while len(picked) < k and tries < 50 * k:
-            c = pool[rng.integers(len(pool))]
-            tries += 1
-            if c != o and (s, c) not in known and c not in picked:
-                picked.append(c)
+            draw = rng.choice(len(cand_all), size=2 * k, p=w) if matched else rng.integers(len(cand_all), size=2 * k)
+            for j in draw:
+                c = cand_all[j]
+                tries += 1
+                if c != o and (s, c) not in known and c not in picked:
+                    picked.append(c)
+                    if len(picked) == k:
+                        break
         rows.extend((i, s, c) for c in picked)
     return rows
 
