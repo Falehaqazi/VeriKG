@@ -11,7 +11,7 @@ import pandas as pd
 
 from . import biolink as B
 
-CURIE = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*:[^\s|]+$")
+CURIE = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*:[^\s|,;]+$")
 STANDARD_PREFIXES = {
     "UniProtKB", "NCBIGene", "HGNC", "CHEMBL.COMPOUND", "PUBCHEM.COMPOUND",
     "DRUGCENTRAL", "GTOPDB", "UNII", "MONDO", "DOID", "UMLS", "OMIM", "MESH",

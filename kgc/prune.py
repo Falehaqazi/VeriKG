@@ -14,6 +14,12 @@ Signals:
     there was enough surrounding graph to judge it by.
   - independent corroboration from an outside source (Open Targets
     association score for gene-disease edges), when it has been fetched
+  - context veto: where the context model is strong (out-of-fold AUROC >= 0.9
+    against corrupted copies; in practice the ligand-protein edges), an edge
+    with enough surrounding graph that is less plausible than three quarters
+    of random mix-ups is capped below the threshold (at most 2% of the edges).
+    This is what catches a good record filed under the wrong entity, which
+    evidence alone cannot.
 
 Structural edges (gene translates to protein) are kept unconditionally;
 computed similarity edges carry their Tanimoto score as confidence.
@@ -96,9 +102,15 @@ def score_edge(predicate, primary, supporting, level, agent, publications,
         sim = similarity if similarity is not None else 0.0
         return round(sim, 3), [f"=tanimoto:{sim:.2f}"]
 
-    conf = SOURCE_PRIOR.get(primary, DEFAULT_PRIOR)
-    notes = [f"=source:{primary}:{conf:.2f}"]
-    if primary not in SOURCE_PRIOR:
+    # Merged edges can carry several sources (an activity from ChEMBL and an
+    # unattributed one, a disease link from OMIM and from text mining): the
+    # prior is the most reliable source's, the others count as corroboration.
+    sources = {s for s in _text(supporting).split(LIST_SEP) if s} | {primary}
+    named = sources - {B.AGGREGATOR} or {primary}
+    best = max(sorted(named), key=lambda s: SOURCE_PRIOR.get(s, DEFAULT_PRIOR))
+    conf = SOURCE_PRIOR.get(best, DEFAULT_PRIOR)
+    notes = [f"=source:{best}:{conf:.2f}"]
+    if best not in SOURCE_PRIOR:
         notes.append("-unknown_source")
 
     def add(delta, label):
@@ -106,8 +118,7 @@ def score_edge(predicate, primary, supporting, level, agent, publications,
         conf += delta
         notes.append(f"{'+' if delta >= 0 else '-'}{label}")
 
-    sources = {s for s in _text(supporting).split(LIST_SEP) if s}
-    n_extra = len(sources - {primary, B.AGGREGATOR})
+    n_extra = len(sources - {best, B.AGGREGATOR})
     if n_extra:
         add(min(0.10 * n_extra, 0.20), f"corroborated_by:{n_extra}")
 
@@ -160,6 +171,17 @@ def context_adjustment(plaus, ctx_notes, ctx_size):
     return round(d, 3), f"{'+' if d >= 0 else '-'}context:{plaus:.2f}:{why}"
 
 
+VETO_MARGIN = 0.05  # a vetoed edge is capped this far below the threshold
+
+
+def context_veto(plaus, cutoff, ctx_size, min_context=CONTEXT_MIN):
+    """True when the surrounding graph contradicts the edge strongly enough to
+    overrule its evidence (see plausibility.score_plausibility)."""
+    if plaus is None or cutoff is None or ctx_size is None:
+        return False
+    return ctx_size >= min_context and plaus < cutoff
+
+
 def external_adjustment(predicate, ot_score):
     """Open Targets corroboration of gene-disease edges (None if not checked)."""
     if predicate != B.ASSOC_CONDITION or ot_score is None:
@@ -178,8 +200,9 @@ def score_edges(edges, threshold=DEFAULT_THRESHOLD, context=None):
     """
     out = edges.copy()
     if context is not None:
-        for c in ("plausibility", "plausibility_notes", "context_size"):
-            out[c] = context[c].reindex(out.index)
+        for c in ("plausibility", "plausibility_notes", "context_size", "veto_cutoff"):
+            if c in context:
+                out[c] = context[c].reindex(out.index)
 
     def col(name):
         return out[name].tolist() if name in out else [None] * len(out)
@@ -189,8 +212,8 @@ def score_edges(edges, threshold=DEFAULT_THRESHOLD, context=None):
                    col("knowledge_level"), col("agent_type"), col("publications"),
                    col("activity_value_max"), col("interaction_score_max"),
                    col("similarity_score"), col("plausibility"), col("plausibility_notes"),
-                   col("context_size"), col("opentargets_score")):
-        pred, prim, sup, lvl, agt, pubs, act, ppi, sim, pl, pln, cs, ot = row
+                   col("context_size"), col("opentargets_score"), col("veto_cutoff")):
+        pred, prim, sup, lvl, agt, pubs, act, ppi, sim, pl, pln, cs, ot, vc = row
         c, n = score_edge(pred, _text(prim), sup, _text(lvl), _text(agt), pubs,
                           _num(act), _num(ppi), _num(sim))
         if pred not in STRUCTURAL and pred != B.SIMILAR:
@@ -199,6 +222,9 @@ def score_edges(edges, threshold=DEFAULT_THRESHOLD, context=None):
                 if note:
                     c = round(min(max(c + d, 0.0), 1.0), 3)
                     n.append(note)
+            if context_veto(_num(pl), _num(vc), _num(cs)):
+                c = round(min(c, threshold - VETO_MARGIN), 3)
+                n.append(f"-context_veto:{_num(pl):.3f}<{_num(vc):.3f}")
         conf.append(c)
         notes.append(n)
 

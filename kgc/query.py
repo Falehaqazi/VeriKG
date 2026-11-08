@@ -189,6 +189,11 @@ DISEASE_HINT = r"(disease|cancer|syndrome|disorder|carcinoma|leukemia|leukaemia|
                r"arthritis|fibrosis|deficiency|dementia|sclerosis|infection|asthma)"
 
 
+# function words a multi-word mention never starts or ends with
+TRIM = {"to", "of", "the", "a", "an", "for", "with", "in", "on", "and", "by", "from", "is", "are",
+        "does", "do", "which", "what", "how", "why", "about", "that", "be", "between", "any", "all"}
+
+
 def _mentions_from(kg, q):
     """Longest-first n-gram scan of the question for known entity names."""
     words = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-.:'’]*", q)
@@ -207,6 +212,9 @@ def _mentions_from(kg, q):
             span = " ".join(words[i:i + n]).strip(".,?!")
             if n == 1 and (span.lower() in stop or len(span) < 3):
                 continue
+            first, last = words[i].lower().strip(".,?!"), words[i + n - 1].lower().strip(".,?!")
+            if n > 1 and (first in TRIM or last in TRIM):
+                continue  # "to breast cancer" -> let the shorter span "breast cancer" match
             hits = kg.ground(span)
             if hits:
                 out.append((i, span, hits))
@@ -227,6 +235,9 @@ def plan_rules(kg, question):
         intent = "pruned"
     elif re.search(r"\b(why|evidence|lineage|how do (we|you) know|source of|proof)\b", ql) and two:
         intent = "explain"
+    elif two and re.match(r"(is|are|does|do|did|can)\b", ql) and \
+            re.search(r"\b(bind|target|inhibit|link|associat|interact|treat)\w*", ql):
+        intent = "explain"  # "Is sorafenib linked to KDR?": a yes/no about one link
     elif re.search(r"\b(predict|might|could|likely|novel|new targets?|what else|repurpos|off.?target)\w*", ql):
         intent = "predict_targets" if has(B.CHEMICAL, B.DRUG) else "predict_ligands"
     elif re.search(r"\b(similar|analog|analogue|look.?alike)\w*", ql) and has(B.CHEMICAL, B.DRUG):
@@ -599,6 +610,7 @@ def readable_reasons(reason):
             "modest_activity": f"modest potency ({val.split(':')[-1]})",
             "low_ppi_score": "low interaction score",
             "context": "surrounding graph does not support it",
+            "context_veto": "surrounding graph contradicts it (less plausible than most random mix-ups)",
             "opentargets": "no Open Targets association",
             "unknown_source": "unknown source",
         }.get(key, tok))
@@ -645,6 +657,7 @@ NOTE_TEXT = {
     "modest_activity": "modest measured activity", "high_ppi_score": "high interaction score",
     "low_ppi_score": "low interaction score", "context": "surrounding graph",
     "opentargets": "Open Targets", "structural": "definitional link", "tanimoto": "structure similarity",
+    "context_veto": "context veto: less plausible than most random mix-ups",
     "unknown_source": "unknown source",
 }
 
@@ -735,3 +748,24 @@ def shortest_paths(kg, a, b, max_hops=4, max_paths=10):
 def ask(kg, question, use_llm=True, explain_fn=None):
     plan = make_plan(kg, question, use_llm=use_llm)
     return execute(kg, plan, explain_fn=explain_fn)
+
+
+def answer_text(ans, max_rows=15):
+    """Plain-text rendering of an Answer for the command line."""
+    p = ans.plan
+    lines = [f"Plan ({p.planner}): {p.intent}  " +
+             ", ".join(f"'{e['text']}' -> {e['id']}" for e in p.entities)]
+    lines += [f"Note: {n}" for n in p.notes]
+    lines += ["", ans.summary.replace("**", "")]
+    if ans.rows:
+        cols = [c for c in ans.columns if c not in ("edge", "edges", "id")] or list(ans.rows[0])
+        lines.append("")
+        lines.append(" | ".join(cols))
+        for r in ans.rows[:max_rows]:
+            lines.append(" | ".join(_t(r.get(c)) if not isinstance(r.get(c), float)
+                                    else f"{r[c]:.3g}" for c in cols))
+        if len(ans.rows) > max_rows:
+            lines.append(f"... {len(ans.rows) - max_rows} more")
+    if ans.cypher:
+        lines += ["", "Cypher: " + ans.cypher]
+    return "\n".join(lines)

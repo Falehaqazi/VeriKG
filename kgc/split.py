@@ -59,20 +59,71 @@ def sample_negatives(pos, candidates, known, degree, k, rng, matched=True):
     return rows
 
 
+def scaffold_groups(nodes):
+    """Chemical ID -> Bemis-Murcko scaffold SMILES.
+
+    Compounds that share a ring system end up in one group, so a scaffold
+    split never puts a close analog of a test compound in training. A
+    compound without a parsable structure or without rings is its own group.
+    """
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem.Scaffolds import MurckoScaffold
+    RDLogger.DisableLog("rdApp.*")
+    chem = nodes[nodes["category"].isin(B.CHEMICALS)]
+    out = {}
+    smiles = chem["smiles"] if "smiles" in chem else [None] * len(chem)
+    for nid, smi in zip(chem["id"], smiles):
+        scaf = ""
+        if isinstance(smi, str) and smi:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                try:
+                    scaf = MurckoScaffold.MurckoScaffoldSmiles(mol=mol, includeChirality=False)
+                except Exception:
+                    scaf = ""
+        out[nid] = scaf or f"single:{nid}"
+    return out
+
+
+def _split_by_group(pairs, groups, frac, rng):
+    """Assign whole groups of subjects to train/val/test until each fold holds
+    its share of pairs. Groups are visited in random order."""
+    by_group = {}
+    for i, (s, _) in enumerate(pairs):
+        by_group.setdefault(groups.get(s, f"single:{s}"), []).append(i)
+    keys = sorted(by_group)
+    order = rng.permutation(len(keys))
+    n = len(pairs)
+    cut_va, cut_te = frac[0] * n, (frac[0] + frac[1]) * n
+    tr, va, te, acc = [], [], [], 0
+    for k in order:
+        idx = by_group[keys[k]]
+        fold = tr if acc < cut_va else (va if acc < cut_te else te)
+        fold.extend(pairs[i] for i in idx)
+        acc += len(idx)
+    return tr, va, te, len(keys)
+
+
 def make_split(nodes, edges, out_dir, predicate=B.INTERACTS_PHYS, seed=0,
-               frac=(0.8, 0.1, 0.1), rank_negatives=99):
+               frac=(0.8, 0.1, 0.1), rank_negatives=99, groups=None):
+    """groups: optional {subject: group}; when given, every subject in a group
+    lands in the same fold (scaffold split). Otherwise pairs are split at random."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
 
     task = edges[edges["predicate"] == predicate]
     pairs = sorted(set(zip(task["subject"], task["object"])))
-    order = rng.permutation(len(pairs))
-    n_tr = int(frac[0] * len(pairs))
-    n_va = int(frac[1] * len(pairs))
-    tr = [pairs[i] for i in order[:n_tr]]
-    va = [pairs[i] for i in order[n_tr:n_tr + n_va]]
-    te = [pairs[i] for i in order[n_tr + n_va:]]
+    n_groups = None
+    if groups is None:
+        order = rng.permutation(len(pairs))
+        n_tr = int(frac[0] * len(pairs))
+        n_va = int(frac[1] * len(pairs))
+        tr = [pairs[i] for i in order[:n_tr]]
+        va = [pairs[i] for i in order[n_tr:n_tr + n_va]]
+        te = [pairs[i] for i in order[n_tr + n_va:]]
+    else:
+        tr, va, te, n_groups = _split_by_group(pairs, groups, frac, rng)
 
     train_graph, removed = audit_leakage(edges, va + te)
 
@@ -103,6 +154,7 @@ def make_split(nodes, edges, out_dir, predicate=B.INTERACTS_PHYS, seed=0,
     train_chems = {s for s, _ in tr}
     report = {
         "predicate": predicate, "seed": seed, "fractions": list(frac),
+        "grouping": "random pairs" if groups is None else f"by subject group ({n_groups} groups)",
         "pairs": {"train": len(tr), "val": len(va), "test": len(te)},
         "leakage_audit_removed_by_source": removed,
         "test_pairs_with_unseen_chemical": float(np.mean([s not in train_chems for s, _ in te])) if te else 0.0,

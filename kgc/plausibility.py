@@ -179,17 +179,35 @@ def corrupt(pairs, objects, known, rng, n=None):
     return out
 
 
+VETO_MIN_AUROC = 0.90     # only a context model this good may overrule good evidence
+VETO_NEG_QUANTILE = 0.75  # veto edges less plausible than 3/4 of corrupted copies...
+VETO_MAX_FLAG = 0.02      # ...unless that would flag more than 2% of the graph's edges
+VETO_MIN_CONTEXT = 3
+
+
 def score_plausibility(edges, folds=5, seed=0, max_train=40000):
     """Out-of-fold context plausibility for every edge of the TASKS predicates.
 
     Returns (DataFrame indexed like `edges` with columns plausibility,
-    plausibility_notes; dict of per-predicate model summaries).
+    plausibility_notes, context_size, veto_cutoff; dict of per-predicate model
+    summaries; the GraphIndex).
+
+    veto_cutoff is set only for predicates whose context model separates real
+    edges from corrupted copies with out-of-fold AUROC >= VETO_MIN_AUROC. It is
+    the VETO_NEG_QUANTILE quantile of the held-out corrupted copies' scores:
+    an edge below it looks less plausible than most random mix-ups. The cutoff
+    is set from the corrupted copies, not from the graph's own edges, so it
+    does not depend on how many errors the graph holds; it is lowered if it
+    would flag more than VETO_MAX_FLAG of the edges that have enough context.
+    prune.py treats an edge under it as contradicted by its context, however
+    good its record looks.
     """
     rng = np.random.default_rng(seed)
     gi = GraphIndex(edges)
     plaus = pd.Series(np.nan, index=edges.index)
     notes = pd.Series("", index=edges.index)
     csize = pd.Series(np.nan, index=edges.index)
+    cutoff = pd.Series(np.nan, index=edges.index)
     summary = {}
     for pred in TASKS:
         sub = edges[edges["predicate"] == pred]
@@ -226,12 +244,24 @@ def score_plausibility(edges, folds=5, seed=0, max_train=40000):
             parts = [n for n, v in zip(names, row) if v > 0]
             top.append(",".join(parts) if parts else "no_context")
         notes.loc[sub.index] = top
+        auc = float(roc_auc_score(np.r_[np.ones(len(oof)), np.zeros(len(oof_neg))], np.r_[oof, oof_neg]))
         summary[pred] = {
             "edges": len(sub), "features": names, "coef": dict(zip(names, np.round(coef, 3).tolist())),
             "share_with_any_context": float(np.mean((X > 0).any(axis=1))),
             # held-out real edges vs held-out corrupted copies
-            "real_vs_corrupted_auroc_oof": float(roc_auc_score(
-                np.r_[np.ones(len(oof)), np.zeros(len(oof_neg))], np.r_[oof, oof_neg])),
+            "real_vs_corrupted_auroc_oof": auc,
         }
-    out = pd.DataFrame({"plausibility": plaus, "plausibility_notes": notes, "context_size": csize})
+        enough = csize.loc[sub.index].values >= VETO_MIN_CONTEXT
+        if auc >= VETO_MIN_AUROC and enough.sum() >= 100:
+            cut = float(np.quantile(oof_neg, VETO_NEG_QUANTILE))
+            capped = float(np.mean(oof[enough] < cut)) > VETO_MAX_FLAG
+            if capped:
+                cut = float(np.quantile(oof[enough], VETO_MAX_FLAG))
+            cutoff.loc[sub.index] = cut
+            summary[pred]["veto"] = {
+                "cutoff": round(cut, 4), "capped_at_max_flag_share": capped,
+                "share_of_corrupted_copies_below": round(float(np.mean(oof_neg < cut)), 4),
+                "share_of_graph_edges_flagged": round(float(np.mean((oof < cut) & enough)), 4)}
+    out = pd.DataFrame({"plausibility": plaus, "plausibility_notes": notes, "context_size": csize,
+                        "veto_cutoff": cutoff})
     return out, summary, gi

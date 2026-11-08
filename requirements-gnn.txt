@@ -1,0 +1,4 @@
+# GNN link prediction (python -m kgc gnn / predict). Install the PyTorch build
+# for your machine first if you need a specific CUDA version: https://pytorch.org
+torch>=2.2
+torch_geometric>=2.5

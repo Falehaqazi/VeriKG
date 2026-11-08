@@ -57,14 +57,33 @@ CHEM_PREFIXES = [
 ]
 
 
+def _ids(val):
+    """A synonym value can list several IDs ("CHEMBL1336,CHEMBL3928540")."""
+    return [v.strip().split(":")[-1] for v in re.split(r"[,;|\s]+", val or "") if v.strip()]
+
+
 def chemical_curie(lig):
+    """The first ID of the most preferred source; Pharos sometimes lists several
+    ChEMBL IDs for one ligand (salt forms, merged records), see chemical_xrefs."""
     syn = {s["name"]: _clean(s["value"]) for s in lig.get("synonyms") or [] if s.get("value")}
     for name, prefix in CHEM_PREFIXES:
-        val = syn.get(name)
-        if val:
-            val = val.split(":")[-1]
-            return f"{prefix}:{val}"
+        ids = _ids(syn.get(name))
+        if ids:
+            return f"{prefix}:{ids[0]}"
     return f"LYCHI:{lig['ligid']}" if lig.get("ligid") else None
+
+
+def chemical_xrefs(lig, primary):
+    """Every other source ID of the ligand, as CURIEs (KGX `xref`)."""
+    out = []
+    for s in lig.get("synonyms") or []:
+        prefix = dict(CHEM_PREFIXES).get(s.get("name"))
+        if prefix:
+            out += [f"{prefix}:{v}" for v in _ids(_clean(s.get("value")))]
+    return sorted(set(out) - {primary})
+
+
+DISEASE_PREFIX_FIX = {"MIM": "OMIM", "MSH": "MESH", "UMLS_CUI": "UMLS"}
 
 
 def disease_curie(disease):
@@ -73,7 +92,8 @@ def disease_curie(disease):
     for a in disease.get("associations") or []:
         did = _clean(a.get("did"))
         if did and ":" in did:
-            return did
+            pre, _, local = did.partition(":")
+            return f"{DISEASE_PREFIX_FIX.get(pre, pre)}:{local}"
     return None
 
 
@@ -202,8 +222,11 @@ class GraphBuilder:
             if chem.startswith("LYCHI:"):
                 self.issues["ligand_id_lychi_only"] += 1
             cat = B.DRUG if lig.get("isdrug") else B.CHEMICAL
+            xrefs = chemical_xrefs(lig, chem)
             self.node(chem, cat, lig.get("name"), smiles=lig.get("smiles"),
-                      lychi=lig.get("ligid"))
+                      lychi=lig.get("ligid"), xref=LIST_SEP.join(xrefs) if xrefs else None)
+            if any(x.startswith(chem.split(":")[0] + ":") for x in xrefs):
+                self.issues["ligand_with_several_ids_first_kept"] += 1
             if lig.get("isdrug") and lig.get("name"):
                 self.drug_by_name.setdefault(lig["name"].strip().lower(), chem)
             acts = lig.get("activities") or []

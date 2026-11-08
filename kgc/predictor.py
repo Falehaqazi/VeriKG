@@ -13,8 +13,8 @@ class Predictor:
         self.prot_ids = list(z["prot_ids"])
         self.ci = {c: i for i, c in enumerate(self.chem_ids)}
         self.pi = {p: i for i, p in enumerate(self.prot_ids)}
-        self.hc, self.hp = z["h_chem"], z["h_prot"]
-        self.w1, self.b1, self.w2, self.b2 = z["w1"], z["b1"], z["w2"], z["b2"]
+        self.hc, self.hp = z["h_chem"].astype(np.float32), z["h_prot"].astype(np.float32)
+        self.w1, self.b1, self.w2, self.b2 = (z[k].astype(np.float32) for k in ("w1", "b1", "w2", "b2"))
 
     def _decode(self, a, b):
         x = np.concatenate([a * b, np.abs(a - b)], axis=-1)

@@ -9,7 +9,7 @@ Structure similarity (offline, no network)
   those the source graph alone carries no signal at all.
 
 External sources (network)
-  See kgc/sources/ for the Open Targets adapter, which corroborates or
+  See kgc/opentargets.py for the Open Targets adapter, which corroborates or
   contradicts gene-disease edges with an independent association score.
 """
 

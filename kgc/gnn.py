@@ -48,6 +48,16 @@ def _torch():
     return torch, F, nn, HeteroData, HeteroConv, SAGEConv
 
 
+def device():
+    """CUDA when available (Brev), else CPU. VERIKG_DEVICE overrides."""
+    import os
+    torch = _torch()[0]
+    want = os.environ.get("VERIKG_DEVICE")
+    if want:
+        return torch.device(want)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def index_nodes(nodes):
     """Per-type contiguous indices: {type: {curie: i}}."""
     idx = {}
@@ -155,22 +165,24 @@ def _pairs_to_index(df, idx):
 
 def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epochs=120,
                hidden=128, lr=0.005, seed=0, holdout=0.3, neg_ratio=2, log=print,
-               patience=4, eval_every=5):
-    """Train on the training graph, early-stop on validation AUROC (degree-matched)."""
+               patience=4, eval_every=5, test_bins=None, min_epochs=60):
+    """Train on the training graph, early-stop on validation AUROC (degree-matched).
+
+    No early stop before min_epochs: on the scaffold split the model sits near
+    0.5 for the first 20 to 40 epochs before it learns from the fingerprints."""
     torch, F, _, _, _, _ = _torch()
     from sklearn.metrics import average_precision_score, roc_auc_score
     torch.manual_seed(seed)
-    rng = np.random.default_rng(seed)
+    dev = device()
     idx = index_nodes(nodes)
-    data = build_hetero(nodes, train_edges, idx, fingerprints)
-    model = LinkModel(data, hidden=hidden, use_fp=fingerprints is not None)
+    data = build_hetero(nodes, train_edges, idx, fingerprints).to(dev)
+    model = LinkModel(data, hidden=hidden, use_fp=fingerprints is not None).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
     sup = data[TASK].edge_index
     n_sup = sup.shape[1]
     deg = torch.bincount(sup[1], minlength=data["protein"].num_nodes).float() + 0.5
     deg = deg / deg.sum()
-    known = set(zip(sup[0].tolist(), sup[1].tolist()))
 
     def message_graph(mask):
         eid = dict(data.edge_index_dict)
@@ -184,7 +196,7 @@ def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epoch
         c, p, ok = _pairs_to_index(df, idx)
         s = np.full(len(df), np.nan)
         with torch.no_grad():
-            s[ok] = model.decode(h, torch.tensor(c), torch.tensor(p)).numpy()
+            s[ok] = model.decode(h, torch.tensor(c, device=dev), torch.tensor(p, device=dev)).cpu().numpy()
         return s
 
     def evaluate(df, h):
@@ -201,9 +213,9 @@ def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epoch
     t0 = time.time()
     for ep in range(1, epochs + 1):
         model.train()
-        perm = torch.randperm(n_sup)
+        perm = torch.randperm(n_sup, device=dev)
         k = int(holdout * n_sup)
-        tgt, keep = perm[:k], torch.ones(n_sup, dtype=torch.bool)
+        tgt, keep = perm[:k], torch.ones(n_sup, dtype=torch.bool, device=dev)
         keep[tgt] = False
         h = model.encode(data, message_graph(keep))
         pc, pp = sup[0, tgt], sup[1, tgt]
@@ -222,15 +234,15 @@ def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epoch
                 h = model.encode(data, full_graph)
             res, _ = evaluate(val, h)
             auc = res["degree_matched"]["auroc"]
-            hist.append({"epoch": ep, "loss": float(loss), "val_auroc_dm": auc})
-            log(f"  epoch {ep:4d} loss {float(loss):.4f} val AUROC (degree-matched) {auc:.4f}"
+            hist.append({"epoch": ep, "loss": loss.item(), "val_auroc_dm": auc})
+            log(f"  epoch {ep:4d} loss {loss.item():.4f} val AUROC (degree-matched) {auc:.4f}"
                 f"  [{time.time() - t0:.0f}s]")
             if auc > best + 1e-4:
                 best, bad = auc, 0
                 best_state = {k_: v.detach().clone() for k_, v in model.state_dict().items()}
             else:
                 bad += 1
-                if bad >= patience:
+                if bad >= patience and ep >= min_epochs:
                     break
     model.load_state_dict(best_state)
     model.eval()
@@ -246,6 +258,17 @@ def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epoch
         y = test["label"].values[sub]
         if len(set(y)) == 2:
             test_res[name] = {"auroc": float(roc_auc_score(y, test_scores[sub])), "n": int(sub.sum())}
+
+    # by how close the test compound is to anything in training (max Tanimoto)
+    if test_bins:
+        by = {}
+        lab = test["subject"].map(test_bins).values
+        for b in sorted({x for x in lab if isinstance(x, str)}):
+            sub = (lab == b) & test["neg_kind"].isin(["positive", "degree_matched"]).values & ~np.isnan(test_scores)
+            y = test["label"].values[sub]
+            if len(set(y)) == 2:
+                by[b] = {"auroc": float(roc_auc_score(y, test_scores[sub])), "n": int(sub.sum())}
+        test_res["by_similarity_to_train"] = by
 
     # sampled ranking: each positive vs its 99 degree-matched negatives
     pos = test[test["label"] == 1].reset_index(drop=True)
@@ -267,8 +290,37 @@ def train_eval(nodes, train_edges, val, test, rank_neg, fingerprints=None, epoch
         (model, data, idx)
 
 
-def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, seed=0, log=print):
-    """Train every config on the same split; write data/results/<name>_gnn.json."""
+SIM_BINS = [(0.0, 0.4, "<0.4"), (0.4, 0.6, "0.4-0.6"), (0.6, 0.8, "0.6-0.8"), (0.8, 1.01, ">=0.8")]
+
+
+def similarity_to_train(fingerprints, test_chems, train_chems):
+    """Max Tanimoto of each test compound to any training compound, and its bin."""
+    ids, bits = fingerprints
+    pos = {n: i for i, n in enumerate(ids)}
+    tr = [pos[c] for c in sorted(train_chems) if c in pos]
+    if not tr:
+        return {}, {}
+    T = np.packbits(bits[tr].astype(bool), axis=1)
+    pop = np.unpackbits(T, axis=1).sum(1).astype(np.float32)
+    lut = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
+    best, label = {}, {}
+    for c in sorted(set(test_chems)):
+        j = pos.get(c)
+        if j is None:
+            continue
+        q = np.packbits(bits[j].astype(bool))
+        inter = lut[np.bitwise_and(T, q)].sum(1).astype(np.float32)
+        union = pop + lut[q].sum() - inter
+        s = float(np.max(np.where(union > 0, inter / union, 0.0)))
+        best[c] = s
+        label[c] = next(lab for lo, hi, lab in SIM_BINS if lo <= s < hi)
+    return best, label
+
+
+def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, seed=0, log=print,
+                   split="random"):
+    """Train every config on the same split; results are merged into
+    data/results/<name>_gnn.json (or <name>_scaffold_gnn.json), one key per config."""
     from .enrich import load_fingerprints
     from .split import make_split
     data_dir = Path(data_dir)
@@ -280,9 +332,14 @@ def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, see
     fps = load_fingerprints(kgx / f"{name}_fingerprints.npz") \
         if (kgx / f"{name}_fingerprints.npz").exists() else None
 
-    split_dir = data_dir / "split" / name
+    tag = name if split == "random" else f"{name}_{split}"
+    split_dir = data_dir / "split" / tag
     if not (split_dir / "train_graph_edges.tsv").exists():
-        make_split(nodes, base_edges, split_dir, seed=seed)
+        groups = None
+        if split == "scaffold":
+            from .split import scaffold_groups
+            groups = scaffold_groups(nodes)
+        make_split(nodes, base_edges, split_dir, seed=seed, groups=groups)
     val = pd.read_csv(split_dir / "val.tsv", sep="\t")
     test = pd.read_csv(split_dir / "test.tsv", sep="\t")
     rank_neg = pd.read_csv(split_dir / "test_rank_negatives.tsv", sep="\t")
@@ -294,8 +351,16 @@ def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, see
         g, _ = audit_leakage(edges, held)
         return g
 
+    bins = None
+    if fps is not None:
+        trn = pd.read_csv(split_dir / "train_graph_edges.tsv", sep="\t", usecols=["subject", "predicate"])
+        train_chems = set(trn.loc[trn["predicate"] == B.INTERACTS_PHYS, "subject"])
+        _, bins = similarity_to_train(fps, test["subject"], train_chems)
+
+    out = data_dir / "results" / f"{tag}_gnn.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    results = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
     configs = configs or ["pharos", "pharos_fp", "verikg", "verikg_pruned"]
-    results = {}
     for cfg in configs:
         log(f"[{cfg}]")
         if cfg == "pharos":
@@ -314,14 +379,13 @@ def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, see
         else:
             raise ValueError(cfg)
         res, _ = train_eval(nodes, tg, val, test, rank_neg, fingerprints=f, epochs=epochs,
-                            seed=seed, log=log)
+                            seed=seed, log=log, test_bins=bins)
         if cfg == "verikg_pruned":
             res["edges_pruned_from_training_graph"] = int((tg["verdict"] == "prune").sum())
+        res["split"] = split
         results[cfg] = res
         log(json.dumps(res["test"], indent=1))
-    out = data_dir / "results" / f"{name}_gnn.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        out.write_text(json.dumps(results, indent=2), encoding="utf-8")  # after every config
     return results
 
 
@@ -331,9 +395,10 @@ def fit_full(nodes, edges, fingerprints=None, epochs=100, hidden=128, lr=0.005, 
     the predictions served in the app. Use the best epoch from run_comparison."""
     torch, F, _, _, _, _ = _torch()
     torch.manual_seed(seed)
+    dev = device()
     idx = index_nodes(nodes)
-    data = build_hetero(nodes, edges, idx, fingerprints)
-    model = LinkModel(data, hidden=hidden, use_fp=fingerprints is not None)
+    data = build_hetero(nodes, edges, idx, fingerprints).to(dev)
+    model = LinkModel(data, hidden=hidden, use_fp=fingerprints is not None).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     sup = data[TASK].edge_index
     n_sup = sup.shape[1]
@@ -341,9 +406,9 @@ def fit_full(nodes, edges, fingerprints=None, epochs=100, hidden=128, lr=0.005, 
     deg = deg / deg.sum()
     for ep in range(1, epochs + 1):
         model.train()
-        perm = torch.randperm(n_sup)
+        perm = torch.randperm(n_sup, device=dev)
         k = int(holdout * n_sup)
-        keep = torch.ones(n_sup, dtype=torch.bool)
+        keep = torch.ones(n_sup, dtype=torch.bool, device=dev)
         keep[perm[:k]] = False
         eid = dict(data.edge_index_dict)
         eid[TASK] = sup[:, keep]
@@ -359,7 +424,7 @@ def fit_full(nodes, edges, fingerprints=None, epochs=100, hidden=128, lr=0.005, 
         loss.backward()
         opt.step()
         if ep % 10 == 0:
-            log(f"  full fit epoch {ep} loss {float(loss):.4f}")
+            log(f"  full fit epoch {ep} loss {loss.item():.4f}")
     model.eval()
     return model, data, idx
 
@@ -371,24 +436,35 @@ def export_predictor(model, data, idx, path):
     with torch.no_grad():
         h = model.encode(data, data.edge_index_dict)
     lin1, lin2 = model.dec[0], model.dec[2]
+    cpu = lambda t: t.detach().cpu().numpy().astype(np.float32)
+    # embeddings in float16 halve the download; Predictor computes in float32
     np.savez_compressed(
         path,
         chem_ids=np.array(list(idx["chemical"])), prot_ids=np.array(list(idx["protein"])),
-        h_chem=h["chemical"].numpy().astype(np.float32), h_prot=h["protein"].numpy().astype(np.float32),
-        w1=lin1.weight.detach().numpy(), b1=lin1.bias.detach().numpy(),
-        w2=lin2.weight.detach().numpy(), b2=lin2.bias.detach().numpy())
+        h_chem=cpu(h["chemical"]).astype(np.float16), h_prot=cpu(h["protein"]).astype(np.float16),
+        w1=cpu(lin1.weight), b1=cpu(lin1.bias), w2=cpu(lin2.weight), b2=cpu(lin2.bias))
 
 
 def export_pyg(nodes, edges, path, fingerprints=None):
     """Whole scored graph as a PyG HeteroData file (torch.save), with node ID
     lists, edge confidence and a keep mask on every edge type, so a subgraph
-    can be cut with HeteroData.subgraph or edge_subgraph."""
+    can be cut with HeteroData.subgraph or edge_subgraph. Fingerprints, when
+    given, are stored packed (data['chemical'].x_packed, uint8, 8 bits a byte):
+    x = torch.from_numpy(np.unpackbits(data['chemical'].x_packed.numpy(), axis=1)).float()"""
     torch = _torch()[0]
     idx = index_nodes(nodes)
     e = edges.copy()
     e["_keep"] = (e["verdict"] != "prune") if "verdict" in e else True
     tmp = e.drop(columns=["verdict"]) if "verdict" in e else e
-    data = build_hetero(nodes, tmp, idx, fingerprints)
+    data = build_hetero(nodes, tmp, idx, None)
+    if fingerprints is not None:
+        ids, bits = fingerprints
+        pos = {n: i for i, n in enumerate(ids)}
+        x = np.zeros((len(idx["chemical"]), bits.shape[1]), dtype=np.uint8)
+        for n, i in idx["chemical"].items():
+            if n in pos:
+                x[i] = bits[pos[n]]
+        data["chemical"].x_packed = torch.from_numpy(np.packbits(x, axis=1))
     cat = dict(zip(nodes["id"], nodes["category"]))
     for pred, grp in e.groupby("predicate"):
         rel = REL_NAME.get(pred)
@@ -411,3 +487,38 @@ def export_pyg(nodes, edges, path, fingerprints=None):
             store.edge_ids = g["id"].tolist() * (2 if a == b else 1)
     torch.save(data, path)
     return data
+
+
+def best_epoch(results_path, config="verikg_pruned", default=100):
+    """Epoch with the best validation AUROC in an earlier comparison run."""
+    try:
+        res = json.loads(Path(results_path).read_text(encoding="utf-8"))
+        hist = res.get(config, res.get("verikg", {})).get("history") or []
+        return max(hist, key=lambda h: h["val_auroc_dm"])["epoch"] if hist else default
+    except (OSError, ValueError, KeyError):
+        return default
+
+
+def run_predict(data_dir, name="pharos_kinase", epochs=None, seed=0, log=print):
+    """Fit on the whole scored graph (pruned edges left out of message passing),
+    export the numpy predictor for the app and the PyG HeteroData file."""
+    from .enrich import load_fingerprints
+    data_dir = Path(data_dir)
+    kgx = data_dir / "kgx"
+    nodes = pd.read_csv(kgx / f"{name}_nodes.tsv", sep="\t", low_memory=False)
+    for cand in (f"{name}_edges_scored.tsv", f"{name}_enriched_edges.tsv", f"{name}_edges.tsv"):
+        if (kgx / cand).exists():
+            edges = pd.read_csv(kgx / cand, sep="\t", low_memory=False)
+            break
+    fp_path = kgx / f"{name}_fingerprints.npz"
+    fps = load_fingerprints(fp_path) if fp_path.exists() else None
+    epochs = epochs or best_epoch(data_dir / "results" / f"{name}_gnn.json")
+    log(f"full fit for {epochs} epochs on {len(edges)} edges")
+    model, data, idx = fit_full(nodes, edges, fingerprints=fps, epochs=epochs, seed=seed, log=log)
+    res_dir = data_dir / "results"
+    res_dir.mkdir(parents=True, exist_ok=True)
+    export_predictor(model, data, idx, res_dir / f"{name}_predictor.npz")
+    export_pyg(nodes, edges, kgx / f"{name}_pyg.pt", fingerprints=fps)
+    return {"epochs": epochs, "predictor": str(res_dir / f"{name}_predictor.npz"),
+            "pyg": str(kgx / f"{name}_pyg.pt"), "chemicals": len(idx["chemical"]),
+            "proteins": len(idx["protein"])}

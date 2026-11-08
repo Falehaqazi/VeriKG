@@ -130,8 +130,12 @@ def run_benchmark(edges, rate=0.02, seed=0, threshold=DEFAULT_THRESHOLD, log=pri
         if not m.any() or not any(p == pred for p, _ in planted):
             continue
         real = m & ~noisy["id"].isin(bad_ids)
-        out = {"real_edges": int(real.sum()),
-               "real_pruned_share": float((full.loc[real, "verdict"] == "prune").mean())}
+        all_bad = m & noisy["id"].isin(bad_ids)
+        pruned = m & (full["verdict"] == "prune")
+        out = {"real_edges": int(real.sum()), "planted_edges": int(all_bad.sum()),
+               "real_pruned_share": float((full.loc[real, "verdict"] == "prune").mean()),
+               "precision_at_threshold": float((pruned & all_bad).sum() / max(pruned.sum(), 1)),
+               "recall_at_threshold": float((full.loc[all_bad, "verdict"] == "prune").mean())}
         for kind in KINDS:
             ids = set(planted.get((pred, kind), []))
             if not ids:
