@@ -17,8 +17,11 @@ LangGraph agents build on this base.
 | Structural validator (domain/range, dangling edges, provenance) | done |
 | Leakage-safe split, degree-proportional negatives | done |
 | CPU baseline (ligand overlap, PPI, pathway features) | done |
+| Edge pruning: confidence and keep/prune verdict on every edge, with reasons | done |
+| Explanations: edge lineage, and supporting paths for unrecorded links | done |
+| Subgraph extraction from a question or IDs, with arrays for PyTorch Geometric | done |
 | Enrichment (Open Targets, OptimusKG, ChEMBL, Monarch) | next |
-| Pruning agent, explanations, UI, Brev Launchable | planned |
+| LangGraph agent, UI, Brev Launchable | planned |
 
 ## Results so far (Pharos 3.19, all 635 kinases)
 
@@ -47,6 +50,10 @@ python -m kgc all                 # build, validate, split, baseline on those 5
 
 python -m kgc pull                # all 635 kinases, about an hour; resumable
 python -m kgc all
+
+python -m kgc prune               # confidence + verdict on every edge; writes whole and pruned graphs
+python -m kgc explain --subject CHEMBL.COMPOUND:CHEMBL25 --object UniProtKB:P00533
+python -m kgc subgraph --question "Which compounds bind EGFR?" --hops 1
 ```
 
 Outputs land in `data/` (git-ignored):

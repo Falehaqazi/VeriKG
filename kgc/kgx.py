@@ -77,7 +77,15 @@ def disease_curie(disease):
     return None
 
 
-def activity_source(ref):
+def activity_source(ref, has_chembl_id=False, moa=None, has_pubs=False):
+    """Primary source of a Pharos ligand activity.
+
+    TCRD loads activities from ChEMBL, Guide to Pharmacology and DrugCentral.
+    The `reference` field names the source when it is a URL, and is otherwise
+    the journal citation of the ChEMBL document the value was extracted from,
+    so a journal citation (or a PMID) on a ChEMBL compound means ChEMBL.
+    Mechanism-of-action rows come from DrugCentral.
+    """
     r = (ref or "").lower()
     if "chembl" in r:
         return "infores:chembl"
@@ -85,6 +93,10 @@ def activity_source(ref):
         return "infores:drugcentral"
     if "pharmacology" in r or "iuphar" in r or "gtopdb" in r:
         return "infores:gtopdb"
+    if moa:
+        return "infores:drugcentral"
+    if has_chembl_id and (has_pubs or re.search(r"\(\d{4}\)", r)):
+        return "infores:chembl"
     return "infores:pharos"
 
 
@@ -112,11 +124,16 @@ class GraphBuilder:
         self.source_version = source_version
         self.run_id = run_id
         self.issues = Counter()
+        self.drug_by_name = {}
+        self.indications = []
 
     def node(self, curie, category, name=None, **props):
         if curie not in self.nodes:
             self.nodes[curie] = {"id": curie, "category": category, "name": name,
-                                 "provided_by": B.AGGREGATOR}
+                                 "provided_by": B.AGGREGATOR,
+                                 "type_iri": B.NODE_TYPE_IRI.get(category)}
+            if category in (B.GENE, B.PROTEIN):
+                self.nodes[curie]["in_taxon"] = B.TAXON_HUMAN
         n = self.nodes[curie]
         if name and not n.get("name"):
             n["name"] = name
@@ -132,6 +149,7 @@ class GraphBuilder:
         if e is None:
             e = self.edges[eid] = {
                 "id": eid, "subject": s, "predicate": p, "object": o,
+                "relation": B.PREDICATE_IRI.get(p),
                 "primary_knowledge_source": primary,
                 "aggregator_knowledge_source": B.AGGREGATOR,
                 "knowledge_level": level, "agent_type": agent,
@@ -186,13 +204,16 @@ class GraphBuilder:
             cat = B.DRUG if lig.get("isdrug") else B.CHEMICAL
             self.node(chem, cat, lig.get("name"), smiles=lig.get("smiles"),
                       lychi=lig.get("ligid"))
+            if lig.get("isdrug") and lig.get("name"):
+                self.drug_by_name.setdefault(lig["name"].strip().lower(), chem)
             acts = lig.get("activities") or []
             if not acts:
                 self.issues["ligand_without_activity_for_target"] += 1
                 continue
+            has_chembl = chem.startswith("CHEMBL.COMPOUND:")
             for a in acts:
                 pubs = [f"PMID:{p['pmid']}" for p in a.get("pubs") or [] if p.get("pmid")]
-                src = activity_source(a.get("reference"))
+                src = activity_source(a.get("reference"), has_chembl, a.get("moa"), bool(pubs))
                 self.edge(chem, B.INTERACTS_PHYS, prot, src, "knowledge_assertion",
                           "manual_agent", pubs=pubs, sources=[src],
                           activity_value_max=a.get("value"),
@@ -205,6 +226,10 @@ class GraphBuilder:
             if dis is None:
                 self.issues["disease_without_id"] += 1
                 continue
+            for a in d.get("associations") or []:
+                if a.get("type") in B.INDICATION_TYPES and a.get("drug"):
+                    # Drug indications become drug-disease edges, never gene-disease.
+                    self.indications.append((a["drug"].strip().lower(), dis, d.get("name")))
             assocs = [a for a in d.get("associations") or []
                       if a.get("type") not in B.INDICATION_TYPES]
             if not assocs:
@@ -249,6 +274,18 @@ class GraphBuilder:
             self.edge(prot, B.PARTICIPATES_IN, pid, "infores:reactome",
                       "knowledge_assertion", "manual_agent")
 
+    def add_indications(self):
+        """DrugCentral indications (reported by Pharos under disease associations)
+        as drug treats-or-studied-to-treat disease edges."""
+        for drug, dis, dname in self.indications:
+            chem = self.drug_by_name.get(drug)
+            if chem is None:
+                self.issues["indication_drug_not_in_graph"] += 1
+                continue
+            self.node(dis, B.DISEASE, dname)
+            self.edge(chem, B.TREATS, dis, "infores:drugcentral", "knowledge_assertion",
+                      "manual_agent", sources=["infores:drugcentral"])
+
     # --- output ---
     def frames(self):
         nodes = pd.DataFrame(list(self.nodes.values()))
@@ -279,6 +316,7 @@ def build_kgx(raw_path, out_dir, name="pharos_kinase", run_id=None):
         for line in f:
             if line.strip():
                 gb.add_target(json.loads(line))
+    gb.add_indications()
     nodes, edges = gb.frames()
     nodes.to_csv(out_dir / f"{name}_nodes.tsv", sep="\t", index=False)
     edges.to_csv(out_dir / f"{name}_edges.tsv", sep="\t", index=False)
