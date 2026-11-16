@@ -151,14 +151,23 @@ so ranking popular kinases high earns nothing (a degree-only score gets
 `pharos` is the graph as pulled; `pharos_fp` adds Morgan fingerprints as
 compound features; `verikg` adds the structure-similarity edges; and
 `verikg_pruned` is verikg after the pruning agent, re-run on the training
-graph alone so no test edge influences what is cut. Single runs (seed 0);
-differences under about 0.01 should not be read as real.
+graph alone so no test edge influences what is cut.
+
+**Seed stability.** The table is seed 0. Repeating the random split with a
+second training seed reproduces VeriKG exactly (AUROC 0.981, Hits@10 0.903
+both times) and moves the source graph a little (0.736 to 0.741). The
+scaffold split is less stable: VeriKG scored 0.958 on seed 0 and 0.914 on
+seed 1, and on seed 1 validation AUROC was still climbing when training hit
+the 120-epoch cap, so part of that gap is undertraining rather than noise.
+Read the scaffold row as *roughly 0.91 to 0.96 against 0.51 for the source
+graph*, not as three decimal places. Reproduce with `--seed 1`.
 
 The enrichment is what carries prediction: on the random split it lifts
 AUROC from 0.736 to 0.981 and Hits@10 from 0.39 to 0.90. Pruning leaves
 link prediction where it was (0.980 against 0.981 on the random split, 0.956
-against 0.958 on the scaffold split): it removes 13,462 edges to make the
-graph more precise without costing the model anything measurable.
+against 0.958 on the scaffold split): both gaps are smaller than the
+seed-to-seed variation above, so pruning removes 13,462 edges to make the
+graph more precise at no measurable cost to prediction.
 
 The **scaffold split** is the honest test for new chemistry: no test compound
 shares a Bemis-Murcko scaffold with any training compound, so every test pair
