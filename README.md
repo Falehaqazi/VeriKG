@@ -10,10 +10,10 @@ questions from people who do not write graph queries. Every answer lists the
 edges it used, and every edge carries its source, papers, confidence and
 verdict.
 
-![Asking a question and reading the evidence behind the answer](docs/img/ask-evidence.png)
+![Asking VeriKG a question and reading the evidence behind the answer](docs/img/demo.gif)
 
-*Every answer names the edges it used. Every edge carries its source, its papers, its
-confidence and why the pruning agent kept or cut it.*
+*A question in plain language, the answer, and the evidence behind it. Full run-through:
+[docs/verikg_demo.mp4](docs/verikg_demo.mp4) (52 s, no narration).*
 
 ## For the judges
 
@@ -176,6 +176,13 @@ neighbour at Tanimoto 0.6 or more exists and cost a little between 0.4 and
 | `pharos_fp` AUROC | 0.720 | 0.839 | 0.958 | 0.974 |
 | `verikg` AUROC | 0.764 | 0.806 | 0.969 | 0.979 |
 | `verikg_pruned` AUROC | 0.708 | 0.819 | 0.966 | 0.976 |
+
+## The answer, with its evidence
+
+![The answer and the lineage of one edge behind it](docs/img/ask-evidence.png)
+
+Every answer names the edges it used. Every edge carries its source, its papers, its
+confidence and why the pruning agent kept or cut it.
 
 ## What the pruning agent removed, and why
 
