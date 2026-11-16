@@ -12,10 +12,10 @@ verdict.
 
 ## Try it
 
-**On Brev:** deploy the VeriKG Launchable and open the link for port 8501
-(setup in [docs/brev.md](docs/brev.md)).
+The full write-up is [docs/VeriKG_Final_Report.pdf](docs/VeriKG_Final_Report.pdf).
 
-**Locally** (Python 3.10 or newer):
+**Locally** (Python 3.10 or newer) — the prebuilt graph downloads, so this is
+running in about five minutes:
 
 ```bash
 python -m venv .venv
@@ -24,6 +24,9 @@ pip install -r requirements.txt
 python -m kgc fetch-data        # prebuilt graph, scores and results
 python -m kgc app               # http://localhost:8501
 ```
+
+**On a GPU instance:** `bash brev/setup.sh` does all of the above and starts
+the app on port 8501; see [docs/brev.md](docs/brev.md) for the Brev Launchable.
 
 Or from the command line:
 
