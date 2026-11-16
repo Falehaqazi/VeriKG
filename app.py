@@ -279,10 +279,12 @@ with model_tab:
         "compound that shares a ring scaffold with a test compound out of training: the honest test for new "
         "chemistry.")
     rows = []
+    ORDER = ["pharos", "pharos_fp", "verikg", "verikg_pruned"]
     for split, path in (("random", RESULTS / f"{NAME}_gnn.json"),
                         ("scaffold", RESULTS / f"{NAME}_scaffold_gnn.json")):
         res = read_json(path) or {}
-        for cfg, r in res.items():
+        for cfg in sorted(res, key=lambda c: ORDER.index(c) if c in ORDER else 99):
+            r = res[cfg]
             t = r.get("test", {})
             rows.append({"split": split, "graph": cfg,
                          "AUROC": t.get("degree_matched", {}).get("auroc"),

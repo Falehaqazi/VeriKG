@@ -10,9 +10,27 @@ questions from people who do not write graph queries. Every answer lists the
 edges it used, and every edge carries its source, papers, confidence and
 verdict.
 
-## Try it
+![Asking a question and reading the evidence behind the answer](docs/img/ask-evidence.png)
 
-The full write-up is [docs/VeriKG_Final_Report.pdf](docs/VeriKG_Final_Report.pdf).
+*Every answer names the edges it used. Every edge carries its source, its papers, its
+confidence and why the pruning agent kept or cut it.*
+
+## For the judges
+
+The full write-up is [docs/VeriKG_Final_Report.pdf](docs/VeriKG_Final_Report.pdf). Where to
+find each criterion, without installing anything:
+
+| Criterion | What to look at | Headline |
+| --- | --- | --- |
+| **Usability (40%)** | The screenshots below; [app.py](app.py); `python -m kgc ask --question "..."` | Twelve kinds of question answered in 2-7 s, in plain language, by someone who writes no graph queries. Any CSV becomes a scored KGX graph. |
+| **Pruning (30%)** | [The pruning screenshot](#what-the-pruning-agent-removed-and-why); [kgc/prune.py](kgc/prune.py), [kgc/plausibility.py](kgc/plausibility.py), [kgc/benchmark.py](kgc/benchmark.py) | Planted errors that carry a real record's source and papers: evidence alone scores AUROC 0.50, the surrounding graph 0.93-0.95. 32% of them removed at a 1.2% false-prune rate. |
+| **Explainability (20%)** | [kgc/explain.py](kgc/explain.py); the Evidence tab above | Full lineage per edge, supporting paths for unrecorded links, the agent's plan and the equivalent Cypher, all shown to the user. |
+| **Standards (10%)** | [docs/schema.md](docs/schema.md); [kgc/biolink.py](kgc/biolink.py) | Biolink throughout; genes `SO:0001217`, proteins `PR:000000001`, `so#translates_to` between them; relation IRI and infores lineage on every edge; KGX TSV and PyTorch Geometric out. |
+
+Reproducing the numbers takes two commands and about five minutes (below). Every figure in
+the report comes from a file in `data/results/`, written by the pipeline, not typed by hand.
+
+## Try it
 
 **Locally** (Python 3.10 or newer) — the prebuilt graph downloads, so this is
 running in about five minutes:
@@ -158,6 +176,18 @@ neighbour at Tanimoto 0.6 or more exists and cost a little between 0.4 and
 | `pharos_fp` AUROC | 0.720 | 0.839 | 0.958 | 0.974 |
 | `verikg` AUROC | 0.764 | 0.806 | 0.969 | 0.979 |
 | `verikg_pruned` AUROC | 0.708 | 0.819 | 0.966 | 0.976 |
+
+## What the pruning agent removed, and why
+
+![The pruning page: what was cut, by source and reason, with the planted-error test](docs/img/pruning.png)
+
+## Link prediction, side by side
+
+![Link prediction across graphs and splits, and scoring an unrecorded pair](docs/img/link-prediction.png)
+
+## The evidence behind an answer, drawn
+
+![The edges behind an answer drawn as a graph, pruned edges dashed](docs/img/evidence-graph.png)
 
 ## Standards
 
