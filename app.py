@@ -45,10 +45,25 @@ def read_json(path):
         return None
 
 
-if not (KGX / f"{NAME}_nodes.tsv").exists():
+@st.cache_resource(show_spinner="First run on this server: downloading the prebuilt graph (about a minute)...")
+def ensure_data():
+    """On a fresh host (Streamlit Cloud, Brev, a bare VM) the graph is not in the
+    repository, so fetch it once. Returns True when the graph is present."""
+    if (KGX / f"{NAME}_nodes.tsv").exists():
+        return True
+    try:
+        from kgc.cli import main as cli_main
+        cli_main(["fetch-data", "--name", NAME])
+    except Exception as exc:  # noqa: BLE001 - surfaced to the user below
+        st.error(f"Could not download the prebuilt graph: {exc}")
+        return False
+    return (KGX / f"{NAME}_nodes.tsv").exists()
+
+
+if not ensure_data():
     st.title("VeriKG")
-    st.error(f"No graph found in {KGX}. Build it with `python -m kgc pull` and `python -m kgc all`, "
-             "or download the prebuilt graph with `python -m kgc fetch-data`.")
+    st.error(f"No graph in {KGX}. Build it with `python -m kgc pull` then `python -m kgc all`, "
+             "or download it with `python -m kgc fetch-data`.")
     st.stop()
 
 kg = load_kg()
