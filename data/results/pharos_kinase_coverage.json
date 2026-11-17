@@ -1,0 +1,54 @@
+{
+  "by_tdl": [
+    {
+      "tdl": "Tclin",
+      "proteins": 648,
+      "with_a_ligand": 68,
+      "without_any_ligand": 580,
+      "ligand_edges": 45765,
+      "pruned": 452,
+      "prune_rate": 0.0099,
+      "median_ligands_per_target_that_has_one": 405.0
+    },
+    {
+      "tdl": "Tchem",
+      "proteins": 1697,
+      "with_a_ligand": 374,
+      "without_any_ligand": 1323,
+      "ligand_edges": 35127,
+      "pruned": 752,
+      "prune_rate": 0.0214,
+      "median_ligands_per_target_that_has_one": 11.0
+    },
+    {
+      "tdl": "Tbio",
+      "proteins": 9470,
+      "with_a_ligand": 13,
+      "without_any_ligand": 9457,
+      "ligand_edges": 17,
+      "pruned": 1,
+      "prune_rate": 0.0588,
+      "median_ligands_per_target_that_has_one": 1.0
+    },
+    {
+      "tdl": "Tdark",
+      "proteins": 1961,
+      "with_a_ligand": 0,
+      "without_any_ligand": 1961,
+      "ligand_edges": 0,
+      "pruned": 0,
+      "prune_rate": null,
+      "median_ligands_per_target_that_has_one": 0.0
+    }
+  ],
+  "prediction_floor": {
+    "tdark_sampled": 300,
+    "distinct_top1_compounds": 3,
+    "most_frequent_top1_share": 0.93,
+    "most_frequent_top1_compound": "CHEMBL.COMPOUND:CHEMBL4204801",
+    "tdark_median_top1_score": 0.0297,
+    "tdark_share_above_0.5": 0.0067,
+    "tclin_with_ligands_median_top1_score": 0.9712,
+    "verdict": "the ranking for ligand-less targets is degenerate; the scores collapse toward zero, so the model signals its own ignorance"
+  }
+}

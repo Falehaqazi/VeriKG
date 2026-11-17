@@ -1,4 +1,7 @@
 data/
+# the coverage report is 1.5 KB and is read by the app on first load,
+# so it ships in the repository rather than behind the data download
+!data/results/pharos_kinase_coverage.json
 __pycache__/
 *.pyc
 .venv/
