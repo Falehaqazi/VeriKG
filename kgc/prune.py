@@ -62,6 +62,11 @@ SOURCE_PRIOR = {
     "infores:diseases": 0.35,
 }
 DEFAULT_PRIOR = 0.40
+# A table the user uploaded is their own measurement, not an anonymous record:
+# the infores will not be in SOURCE_PRIOR above, but the user vouches for it.
+# Trust it like a mid-tier curated resource and let context and potency decide
+# from there, rather than pruning every row for an "unknown" source.
+USER_PRIOR = 0.70
 
 LEVEL_ADJ = {
     "knowledge_assertion": 0.0,
@@ -94,7 +99,7 @@ def _num(v):
 
 
 def score_edge(predicate, primary, supporting, level, agent, publications,
-               activity=None, ppi_score=None, similarity=None):
+               activity=None, ppi_score=None, similarity=None, user_supplied=False):
     """Return (confidence, notes). Notes are signed: +gain, -loss, =prior."""
     if predicate in STRUCTURAL:
         return 1.0, ["+structural"]
@@ -108,10 +113,14 @@ def score_edge(predicate, primary, supporting, level, agent, publications,
     sources = {s for s in _text(supporting).split(LIST_SEP) if s} | {primary}
     named = sources - {B.AGGREGATOR} or {primary}
     best = max(sorted(named), key=lambda s: SOURCE_PRIOR.get(s, DEFAULT_PRIOR))
-    conf = SOURCE_PRIOR.get(best, DEFAULT_PRIOR)
+    known = best in SOURCE_PRIOR
+    if known:
+        conf = SOURCE_PRIOR[best]
+    else:
+        conf = USER_PRIOR if user_supplied else DEFAULT_PRIOR
     notes = [f"=source:{best}:{conf:.2f}"]
-    if best not in SOURCE_PRIOR:
-        notes.append("-unknown_source")
+    if not known:
+        notes.append("+user_supplied" if user_supplied else "-unknown_source")
 
     def add(delta, label):
         nonlocal conf
@@ -212,10 +221,12 @@ def score_edges(edges, threshold=DEFAULT_THRESHOLD, context=None):
                    col("knowledge_level"), col("agent_type"), col("publications"),
                    col("activity_value_max"), col("interaction_score_max"),
                    col("similarity_score"), col("plausibility"), col("plausibility_notes"),
-                   col("context_size"), col("opentargets_score"), col("veto_cutoff")):
-        pred, prim, sup, lvl, agt, pubs, act, ppi, sim, pl, pln, cs, ot, vc = row
+                   col("context_size"), col("opentargets_score"), col("veto_cutoff"),
+                   col("source_version")):
+        pred, prim, sup, lvl, agt, pubs, act, ppi, sim, pl, pln, cs, ot, vc, sv = row
         c, n = score_edge(pred, _text(prim), sup, _text(lvl), _text(agt), pubs,
-                          _num(act), _num(ppi), _num(sim))
+                          _num(act), _num(ppi), _num(sim),
+                          user_supplied=_text(sv) == "user_upload")
         if pred not in STRUCTURAL and pred != B.SIMILAR:
             for d, note in (context_adjustment(_num(pl), _text(pln), _num(cs)),
                             external_adjustment(pred, _num(ot))):

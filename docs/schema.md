@@ -52,5 +52,5 @@ Added by the pruning agent (`*_edges_scored.tsv`):
 | `confidence` | 0 to 1, from the signals in `confidence_notes` |
 | `confidence_notes` | signed signals: `=source:<infores>:<prior>`, `+literature:3`, `-level:statistical_association`, `-context:0.12:no_supporting_context`, `-context_veto:0.031<0.049`, ... |
 | `plausibility`, `plausibility_notes`, `context_size` | out-of-fold context model score, the context features that fired, and how much surrounding graph there was |
-| `opentargets_score` | Open Targets association score for gene-disease edges, when fetched |
+| `opentargets_score` | Open Targets association score for gene-disease edges. Only present once `python -m kgc opentargets` has been run; the shipped graph does not carry it |
 | `verdict`, `prune_reason` | `keep` or `prune` (confidence below 0.45), and the negative signals behind a prune |

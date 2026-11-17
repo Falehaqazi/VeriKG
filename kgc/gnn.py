@@ -382,10 +382,14 @@ def run_comparison(data_dir, name="pharos_kinase", configs=None, epochs=120, see
                             seed=seed, log=log, test_bins=bins)
         if cfg == "verikg_pruned":
             res["edges_pruned_from_training_graph"] = int((tg["verdict"] == "prune").sum())
-        res["split"] = split
+        # Record what produced this entry: re-running one config overwrites it in
+        # place, so an entry has to say for itself which settings it came from.
+        res["split"], res["seed"], res["epoch_cap"] = split, seed, epochs
         results[cfg] = res
         log(json.dumps(res["test"], indent=1))
         out.write_text(json.dumps(results, indent=2), encoding="utf-8")  # after every config
+    log(f"wrote {out} (entries: " + ", ".join(
+        f"{k} seed {v.get('seed', '?')}, cap {v.get('epoch_cap', '?')}" for k, v in results.items()) + ")")
     return results
 
 

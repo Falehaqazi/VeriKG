@@ -298,3 +298,25 @@ def test_prior_comes_from_the_most_reliable_source():
     c2, _ = score_edge(B.ASSOC_CONDITION, "infores:monarchinitiative", "infores:monarchinitiative",
                        "knowledge_assertion", "manual_agent", "")
     assert c > c2
+
+
+def test_uploaded_table_is_trusted_not_pruned_as_unknown(tmp_path):
+    """A researcher's own table should survive pruning; the agent is there to
+    flag what the graph contradicts, not to distrust the upload wholesale."""
+    from kgc.agent import run_build
+    df = pd.DataFrame({"compound": ["CHEMBL25", "CHEMBL941", "CHEMBL1336"],
+                       "uniprot": ["P23219", "P00519", "P35968"],
+                       "pIC50": [5.1, 7.9, 8.1]})
+    final = run_build({"source": "table", "name": "screen", "data_dir": str(tmp_path), "table": df},
+                      on_step=lambda *_: None)
+    e = final["edges"]
+    assert (e["verdict"] == "keep").all(), e[["confidence", "prune_reason"]].to_dict("records")
+    assert not e["confidence_notes"].str.contains("unknown_source").any()
+    assert e["confidence_notes"].str.contains(r"\+user_supplied").all()
+
+
+def test_unknown_source_outside_an_upload_is_still_penalised():
+    from kgc.prune import score_edge
+    c, notes = score_edge(B.INTERACTS_PHYS, "infores:mystery", "", "knowledge_assertion",
+                          "manual_agent", "")
+    assert "-unknown_source" in notes and c < 0.45

@@ -86,6 +86,7 @@ entities, what was pruned and why, and an entity summary.
 | Source edges | 198,491: 80,909 ligand-protein, 95,012 protein-protein, 14,114 gene-disease, 7,689 protein-pathway, 635 gene-protein, 132 drug-indication |
 | Added by enrichment | 295,484 structure-similarity edges (Morgan fingerprints, Tanimoto >= 0.6, 10 nearest neighbours) |
 | Validator | 0 errors, 0 warnings |
+| Dropped at ingest | 566 disease records Pharos gave no usable identifier for, and 29 chemicals with no structure (counted in `pharos_kinase_stats.json`) |
 
 ### Pruning
 
@@ -111,7 +112,7 @@ papers and potency kept, so each planted edge looks like a curated record
 filed under the wrong entity. Evidence scoring alone
 cannot see these (AUROC 0.50, as designed); context can:
 
-| Edge type | Planted | AUROC, evidence only | AUROC, evidence + context (random / degree / near-miss swaps) | Planted edges pruned | Real edges pruned | Precision of pruning |
+| Edge type | Planted | AUROC, evidence only (mean of the three swaps) | AUROC, evidence + context (random / degree / near-miss swaps) | Planted edges pruned | Real edges pruned | Precision of pruning |
 | --- | --- | --- | --- | --- | --- | --- |
 | Ligand-protein | 4,854 | 0.50 | 0.953 / 0.928 / 0.928 | 32.0% | 1.2% | 61.0% |
 | Gene-disease | 846 | 0.52 | 0.669 / 0.573 / 0.709 | 61.7% | 26.4% | 12.3% |
@@ -160,7 +161,7 @@ scaffold split is less stable: VeriKG scored 0.958 on seed 0 and 0.914 on
 seed 1, and on seed 1 validation AUROC was still climbing when training hit
 the 120-epoch cap, so part of that gap is undertraining rather than noise.
 Read the scaffold row as *roughly 0.91 to 0.96 against 0.51 for the source
-graph*, not as three decimal places. Reproduce with `--seed 1`.
+graph*, not as three decimal places. Reproduce with `--seed 1`; the seed 1 runs ship as `data/results/pharos_kinase_gnn_seed1.json` and `*_scaffold_gnn_seed1.json`, and every GNN entry records the `seed` and `epoch_cap` it came from.
 
 The enrichment is what carries prediction: on the random split it lifts
 AUROC from 0.736 to 0.981 and Hits@10 from 0.39 to 0.90. Pruning leaves
