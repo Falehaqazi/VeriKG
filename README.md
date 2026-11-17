@@ -238,6 +238,8 @@ presentation fixes that. So the app refuses to show a ranked list for a target i
 that state and labels any single score for one as "no evidence either way" rather
 than a weak yes.
 
+![Ligand coverage by Pharos level, and the app refusing to over-read a score for a Tdark target](docs/img/coverage-guard.png)
+
 We would rather ship this negative result than a shortlist of dark-kinome
 "candidates" that a reviewer could not distinguish from noise. `python -m kgc
 coverage` reproduces every number above.
