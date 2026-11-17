@@ -22,19 +22,16 @@ find each criterion, without installing anything:
 
 | Criterion | What to look at | Headline |
 | --- | --- | --- |
-| **Usability (40%)** | [verikg.streamlit.app](https://verikg.streamlit.app); the screenshots below; `python -m kgc ask --question "..."` | Twelve kinds of question answered in 2-7 s, in plain language, by someone who writes no graph queries. Any CSV becomes a scored KGX graph. |
+| **Usability (40%)** | The screenshots below; [app.py](app.py); `python -m kgc ask --question "..."` | Twelve kinds of question answered in 2-7 s, in plain language, by someone who writes no graph queries. Any CSV becomes a scored KGX graph. |
 | **Pruning (30%)** | [The pruning screenshot](#what-the-pruning-agent-removed-and-why); [kgc/prune.py](kgc/prune.py), [kgc/plausibility.py](kgc/plausibility.py), [kgc/benchmark.py](kgc/benchmark.py) | Planted errors that carry a real record's source and papers: evidence alone scores AUROC 0.50, the surrounding graph 0.93-0.95. 32% of them removed at a 1.2% false-prune rate. |
 | **Explainability (20%)** | [kgc/explain.py](kgc/explain.py); the Evidence tab above | Full lineage per edge, supporting paths for unrecorded links, the agent's plan and the equivalent Cypher, all shown to the user. |
+| **Knowing its own limits** | [The coverage section](#where-the-graph-is-empty-and-where-prediction-stops-working); [kgc/coverage.py](kgc/coverage.py); `python -m kgc coverage` | 13,321 of 13,776 proteins have no ligand. We tested whether the predictor can serve them and report that it cannot: 3 compounds top 300 Tdark targets, median score 0.030 against 0.971. The app refuses to rank where it has no evidence. |
 | **Standards (10%)** | [docs/schema.md](docs/schema.md); [kgc/biolink.py](kgc/biolink.py) | Biolink throughout; genes `SO:0001217`, proteins `PR:000000001`, `so#translates_to` between them; relation IRI and infores lineage on every edge; KGX TSV and PyTorch Geometric out. |
 
 Reproducing the numbers takes two commands and about five minutes (below). Every figure in
 the report comes from a file in `data/results/`, written by the pipeline, not typed by hand.
 
 ## Try it
-
-**Live, nothing to install: [verikg.streamlit.app](https://verikg.streamlit.app)**
-If the app has been idle it sleeps, so the first load can take a minute while it
-wakes and fetches the graph; after that questions come back in seconds.
 
 **Locally** (Python 3.10 or newer) — the prebuilt graph downloads, so this is
 running in about five minutes:
@@ -191,6 +188,60 @@ neighbour at Tanimoto 0.6 or more exists and cost a little between 0.4 and
 | `verikg` AUROC | 0.764 | 0.806 | 0.969 | 0.979 |
 | `verikg_pruned` AUROC | 0.708 | 0.819 | 0.966 | 0.976 |
 
+### Where the graph is empty, and where prediction stops working
+
+Pharos exists to illuminate understudied targets, so it labels every protein with a
+target development level. Those labels travel onto our protein nodes, which lets us
+check the two things an IDG reviewer would actually want checked.
+
+**Does pruning fall evenly across the four levels?** An agent that quietly deleted the
+understudied end of the graph would look good on aggregate metrics while doing real
+harm.
+
+| Pharos level | Proteins | Have a ligand | No ligand at all | Ligand edges | Pruned | Prune rate | Median ligands, of targets that have any |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Tclin | 648 | 68 | 580 | 45,765 | 452 | 0.99% | 405 |
+| Tchem | 1,697 | 374 | 1,323 | 35,127 | 752 | 2.14% | 11 |
+| Tbio | 9,470 | 13 | 9,457 | 17 | 1 | 5.88% | 1 |
+| Tdark | 1,961 | 0 | 1,961 | 0 | - | - | - |
+
+The rate doubles from Tclin to Tchem, and we report that rather than bury it: a
+Tchem binding claim is likelier to rest on a single assay from a lower-tier source,
+which is exactly what the confidence model marks down. The apparent 5.88% at Tbio is
+one pruned edge out of seventeen and should not be read as a rate at all. The
+distribution is also the honest headline about the graph: **evidence is concentrated
+in a few hundred well-studied kinases**, and 13,321 of 13,776 proteins carry no
+ligand whatsoever.
+
+**Can the predictor say anything about the targets that have none?** This is the
+tempting claim - 1,961 Tdark kinases, 1,947 of which do have protein-interaction or
+pathway context, so the model has *something* to reason from. We ran it, and the
+answer is no:
+
+| | Ligand-less Tdark targets | Tclin targets with ligands |
+| --- | --- | --- |
+| Median top-1 score | **0.030** | **0.971** |
+| Share scoring above 0.5 | 0.7% | - |
+| Distinct compounds taking the top slot (300 sampled) | **3** | - |
+| Largest share taken by one compound | **93%** | - |
+
+Three compounds come top for three hundred different targets, one of them for 93% of
+them - and those compounds each bind a single kinase in the graph, so this is not even
+popularity bias. With no ligand neighbourhood to reason from, the ranking collapses
+onto a near-constant list.
+
+Read the two halves separately, because they point in opposite directions. The
+**scores are honest**: they fall to the floor where the graph is empty, two orders of
+magnitude below the calibrated range, so the model does not manufacture confidence it
+has not earned. The **ranking underneath them is not usable**, and no amount of
+presentation fixes that. So the app refuses to show a ranked list for a target in
+that state and labels any single score for one as "no evidence either way" rather
+than a weak yes.
+
+We would rather ship this negative result than a shortlist of dark-kinome
+"candidates" that a reviewer could not distinguish from noise. `python -m kgc
+coverage` reproduces every number above.
+
 ## The answer, with its evidence
 
 ![The answer and the lineage of one edge behind it](docs/img/ask-evidence.png)
@@ -242,6 +293,7 @@ python -m kgc split-scaffold          # scaffold split
 python -m kgc gnn                     # link prediction, random split
 python -m kgc gnn --split scaffold
 python -m kgc predict                 # model for the app, plus the PyG export
+python -m kgc coverage                # ligand coverage by Pharos level, and the prediction floor
 python -m kgc app
 ```
 

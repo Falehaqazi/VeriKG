@@ -314,6 +314,33 @@ with model_tab:
                    "training graph only.")
     else:
         st.info("Run `python -m kgc gnn` to fill this table.")
+    st.markdown("**Where prediction stops working**")
+    cov = read_json(RESULTS / f"{NAME}_coverage.json")
+    if cov:
+        st.dataframe(pd.DataFrame(cov["by_tdl"]).rename(columns={
+            "tdl": "Pharos level", "proteins": "proteins", "with_a_ligand": "has a ligand",
+            "without_any_ligand": "no ligand at all", "ligand_edges": "ligand edges",
+            "pruned": "pruned", "prune_rate": "prune rate",
+            "median_ligands_per_target_that_has_one": "median ligands, targets that have any"}),
+            width="stretch", hide_index=True)
+        f = cov.get("prediction_floor") or {}
+        if f.get("tdark_sampled"):
+            st.markdown(
+                f"Pharos labels {next(r['proteins'] for r in cov['by_tdl'] if r['tdl'] == 'Tdark')} of these "
+                f"kinases **Tdark** - almost nothing is known about them - and not one has a ligand. The obvious "
+                f"thing to try is to let the predictor propose ligands for them. It does not work, and the "
+                f"failure is measurable: across {f['tdark_sampled']} sampled Tdark targets only "
+                f"**{f['distinct_top1_compounds']} distinct compounds** ever come top, one of them for "
+                f"{f['most_frequent_top1_share']:.0%} of targets, and the median top score is "
+                f"**{f['tdark_median_top1_score']:.3f}** against **{f['tclin_with_ligands_median_top1_score']:.3f}** "
+                f"for Tclin targets the graph knows. With no ligand neighbourhood to reason from the ranking "
+                f"collapses onto a near-constant list. The scores are honest - they fall to the floor instead of "
+                f"inventing confidence - but the order beneath them carries no target-specific signal, so this app "
+                f"will not show you a ranked list for a target in that state.")
+        st.caption("Reproduce with `python -m kgc coverage`.")
+    else:
+        st.info("Run `python -m kgc coverage` to fill this section.")
+
     st.markdown("**Score a pair**")
     if kg.predictions is None:
         st.caption("Run `python -m kgc predict` to enable scores for unrecorded pairs.")
@@ -329,7 +356,17 @@ with model_tab:
             if sc is None:
                 st.warning("One of these is not in the model.")
             else:
+                kept = kg.edges[kg.edges["verdict"] != "prune"]
+                grounded = bool(len(kept[(kept["predicate"] == B.INTERACTS_PHYS)
+                                         & (kept["object"] == p_id)]))
                 st.metric(f"{kg.label(c_id)} → {kg.label(p_id)}", f"{sc:.3f}")
+                if not grounded:
+                    st.warning(
+                        f"{kg.label(p_id)} has no ligand in this graph, so this score rests only on its "
+                        "protein and pathway neighbours. Measured against targets that do have ligands, "
+                        "scores in this state are not calibrated and the ranking they imply is degenerate "
+                        "(see *Where prediction stops working* above). Read it as 'no evidence either way', "
+                        "not as a weak yes.")
                 st.text(explain_fn(c_id, p_id)["text"])
 
 with table_tab:

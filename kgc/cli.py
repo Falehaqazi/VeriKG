@@ -31,6 +31,8 @@ Agent steps (after build):
   update       re-pull when Pharos has a new release and write a changelog
   app          start the web app (Streamlit)
   fetch-data   download the prebuilt graph and results instead of building them
+  coverage     ligand coverage and pruning by Pharos target development level,
+               and whether prediction says anything about ligand-less targets
 """
 
 import argparse
@@ -239,6 +241,11 @@ def cmd_fetch_data(a):
         print(f"wrote {pruned} and {verdicts}")
 
 
+def cmd_coverage(a):
+    from .coverage import run_coverage
+    run_coverage(DATA, a.name)
+
+
 def cmd_app(a):
     import subprocess
     app = Path(__file__).resolve().parent.parent / "app.py"
@@ -251,7 +258,7 @@ STEPS = {"pull": cmd_pull, "build": cmd_build, "validate": cmd_validate, "split"
          "subgraph": cmd_subgraph, "enrich": cmd_enrich, "opentargets": cmd_opentargets,
          "benchmark": cmd_benchmark, "split-scaffold": cmd_split_scaffold, "gnn": cmd_gnn,
          "predict": cmd_predict, "ask": cmd_ask, "table": cmd_table, "update": cmd_update,
-         "app": cmd_app, "fetch-data": cmd_fetch_data}
+         "app": cmd_app, "fetch-data": cmd_fetch_data, "coverage": cmd_coverage}
 
 
 def main(argv=None):

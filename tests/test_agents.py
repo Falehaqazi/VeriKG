@@ -320,3 +320,45 @@ def test_unknown_source_outside_an_upload_is_still_penalised():
     c, notes = score_edge(B.INTERACTS_PHYS, "infores:mystery", "", "knowledge_assertion",
                           "manual_agent", "")
     assert "-unknown_source" in notes and c < 0.45
+
+
+# --------------------------------------------------------------- coverage
+
+
+def _tdl_frame():
+    import pandas as pd
+    from kgc import biolink as B
+    nodes = pd.DataFrame([
+        {"id": "UniProtKB:P1", "category": B.PROTEIN, "tdl": "Tclin"},
+        {"id": "UniProtKB:P2", "category": B.PROTEIN, "tdl": "Tdark"},
+        {"id": "CHEMBL.COMPOUND:C1", "category": B.CHEMICAL, "tdl": ""},
+    ])
+    edges = pd.DataFrame([
+        {"subject": "CHEMBL.COMPOUND:C1", "predicate": B.INTERACTS_PHYS,
+         "object": "UniProtKB:P1", "verdict": "keep"},
+        {"subject": "CHEMBL.COMPOUND:C1", "predicate": B.INTERACTS_PHYS,
+         "object": "UniProtKB:P1", "verdict": "prune"},
+    ])
+    return nodes, edges
+
+
+def test_coverage_separates_liganded_from_ligandless_levels():
+    from kgc.coverage import coverage_by_tdl
+    nodes, edges = _tdl_frame()
+    rows = {r["tdl"]: r for r in coverage_by_tdl(nodes, edges)}
+    assert rows["Tclin"]["with_a_ligand"] == 1 and rows["Tclin"]["without_any_ligand"] == 0
+    # the pruned duplicate must not count as evidence, but must count in the rate
+    assert rows["Tclin"]["ligand_edges"] == 2 and rows["Tclin"]["pruned"] == 1
+    assert rows["Tclin"]["prune_rate"] == 0.5
+    assert rows["Tdark"]["with_a_ligand"] == 0 and rows["Tdark"]["without_any_ligand"] == 1
+    assert rows["Tdark"]["ligand_edges"] == 0
+
+
+def test_a_target_whose_only_ligand_edge_was_pruned_is_unsupported():
+    """The guard has to read verdicts, not raw edges: an edge the agent threw out
+    is not evidence, and a prediction for that target must not claim grounding."""
+    from kgc.coverage import supported_for_prediction
+    nodes, edges = _tdl_frame()
+    assert supported_for_prediction(edges, "UniProtKB:P1") is True
+    assert supported_for_prediction(edges.assign(verdict="prune"), "UniProtKB:P1") is False
+    assert supported_for_prediction(edges, "UniProtKB:P2") is False
