@@ -38,6 +38,19 @@ def load_kg():
     return kg
 
 
+@st.cache_resource(show_spinner=False)
+def liganded_targets():
+    """Proteins with at least one kept ligand edge, built once.
+
+    The prediction guard needs this on every score, and the edge table is large:
+    filtering it per call copies hundreds of megabytes and will exhaust a small
+    host. A boolean mask over two columns, kept as a set of ids, costs almost
+    nothing instead."""
+    e = load_kg().edges
+    mask = (e["predicate"] == B.INTERACTS_PHYS) & (e["verdict"] != "prune")
+    return set(e.loc[mask, "object"])
+
+
 def read_json(path):
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -356,9 +369,7 @@ with model_tab:
             if sc is None:
                 st.warning("One of these is not in the model.")
             else:
-                kept = kg.edges[kg.edges["verdict"] != "prune"]
-                grounded = bool(len(kept[(kept["predicate"] == B.INTERACTS_PHYS)
-                                         & (kept["object"] == p_id)]))
+                grounded = p_id in liganded_targets()
                 st.metric(f"{kg.label(c_id)} → {kg.label(p_id)}", f"{sc:.3f}")
                 if not grounded:
                     st.warning(
