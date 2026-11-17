@@ -68,6 +68,37 @@ def _t(v):
 
 # ---------------------------------------------------------------- graph access
 
+# The query layer reads half a million edges and holds them for the life of the
+# process, so how they are read decides whether the app fits on a small host.
+# Columns nothing here reads are left on disk, and the columns that repeat a
+# handful of values across every row are stored once each as categories. Read
+# plainly the frame costs about 282 MB; this brings it to about 89 MB, with the
+# same values. No code here groups by these columns, so the category dtype
+# changes nothing a caller can observe.
+_EDGE_COLUMNS = [
+    "id", "subject", "predicate", "object", "relation", "primary_knowledge_source",
+    "aggregator_knowledge_source", "knowledge_level", "agent_type", "source_version",
+    "publications", "supporting_sources", "evidence_count", "activity_value_max",
+    "activity_type_set", "similarity_score", "confidence", "confidence_notes",
+    "verdict", "prune_reason",
+]
+_EDGE_CATEGORICAL = [
+    "subject", "object", "predicate", "relation", "primary_knowledge_source",
+    "aggregator_knowledge_source", "knowledge_level", "agent_type", "source_version",
+    "verdict", "prune_reason", "activity_type_set",
+]
+
+
+def _read_edges(path):
+    head = pd.read_csv(path, sep="\t", nrows=0)
+    use = [c for c in _EDGE_COLUMNS if c in head.columns] or None
+    # Declaring the categories at parse time rather than converting afterwards
+    # also keeps the transient peak down: pandas never materialises the full
+    # object array for these columns.
+    dtype = {c: "category" for c in _EDGE_CATEGORICAL if c in head.columns}
+    return pd.read_csv(path, sep="\t", low_memory=False, usecols=use, dtype=dtype)
+
+
 class KG:
     """The scored graph plus the lookups the planner and executor need."""
 
@@ -96,7 +127,7 @@ class KG:
         nodes = pd.read_csv(kgx_dir / f"{name}_nodes.tsv", sep="\t", low_memory=False)
         for cand in (f"{name}_edges_scored.tsv", f"{name}_enriched_edges.tsv", f"{name}_edges.tsv"):
             if (kgx_dir / cand).exists():
-                edges = pd.read_csv(kgx_dir / cand, sep="\t", low_memory=False)
+                edges = _read_edges(kgx_dir / cand)
                 break
         pred_path = kgx_dir.parent / "results" / f"{name}_predictor.npz"
         preds = None
