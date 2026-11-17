@@ -22,7 +22,7 @@ find each criterion, without installing anything:
 
 | Criterion | What to look at | Headline |
 | --- | --- | --- |
-| **Usability (40%)** | The screenshots below; [app.py](app.py); `python -m kgc ask --question "..."` | Twelve kinds of question answered in 2-7 s, in plain language, by someone who writes no graph queries. Any CSV becomes a scored KGX graph. |
+| **Usability (40%)** | [verikg.streamlit.app](https://verikg.streamlit.app); the screenshots below; `python -m kgc ask --question "..."` | Twelve kinds of question answered in 2-7 s, in plain language, by someone who writes no graph queries. Any CSV becomes a scored KGX graph. |
 | **Pruning (30%)** | [The pruning screenshot](#what-the-pruning-agent-removed-and-why); [kgc/prune.py](kgc/prune.py), [kgc/plausibility.py](kgc/plausibility.py), [kgc/benchmark.py](kgc/benchmark.py) | Planted errors that carry a real record's source and papers: evidence alone scores AUROC 0.50, the surrounding graph 0.93-0.95. 32% of them removed at a 1.2% false-prune rate. |
 | **Explainability (20%)** | [kgc/explain.py](kgc/explain.py); the Evidence tab above | Full lineage per edge, supporting paths for unrecorded links, the agent's plan and the equivalent Cypher, all shown to the user. |
 | **Standards (10%)** | [docs/schema.md](docs/schema.md); [kgc/biolink.py](kgc/biolink.py) | Biolink throughout; genes `SO:0001217`, proteins `PR:000000001`, `so#translates_to` between them; relation IRI and infores lineage on every edge; KGX TSV and PyTorch Geometric out. |
@@ -31,6 +31,10 @@ Reproducing the numbers takes two commands and about five minutes (below). Every
 the report comes from a file in `data/results/`, written by the pipeline, not typed by hand.
 
 ## Try it
+
+**Live, nothing to install: [verikg.streamlit.app](https://verikg.streamlit.app)**
+If the app has been idle it sleeps, so the first load can take a minute while it
+wakes and fetches the graph; after that questions come back in seconds.
 
 **Locally** (Python 3.10 or newer) — the prebuilt graph downloads, so this is
 running in about five minutes:
