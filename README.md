@@ -6,7 +6,7 @@ on the `main` branch.
 
 | File | Contents |
 | --- | --- |
-| `verikg_data.zip` | `data/kgx/`: nodes, source edges, every edge with confidence and verdict (KGX TSV), fingerprints, reports; `data/results/`: baselines, GNN comparisons, planted-error benchmark, the app's link predictor |
+| `verikg_data.zip` | `data/kgx/`: nodes, source edges, every edge with confidence and verdict (KGX TSV), fingerprints, reports; `data/results/`: baselines, GNN comparisons for seed 0 and the seed 1 repeat, planted-error benchmark, the app's link predictor. Each GNN entry records the `seed` and `epoch_cap` it came from |
 | `verikg_pyg.zip` | `data/kgx/pharos_kinase_pyg.pt`: the scored graph as PyTorch Geometric HeteroData |
 
 `fetch-data` also writes the pruned graph and the verdict table from the
