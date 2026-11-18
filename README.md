@@ -44,8 +44,10 @@ python -m kgc fetch-data        # prebuilt graph, scores and results
 python -m kgc app               # http://localhost:8501
 ```
 
-**On a GPU instance:** `bash brev/setup.sh` does all of the above and starts
-the app on port 8501; see [docs/brev.md](docs/brev.md) for the Brev Launchable.
+**On a GPU, in one click:** the [VeriKG Brev Launchable](https://brev.nvidia.com/launchable/deploy?launchableID=env-3MHhl4Tzy8PWfQ8VoHZAuQdHdtW) deploys an
+L4 instance with everything installed, the prebuilt graph downloaded and the app
+on port 8501. On any other Linux box, `bash brev/setup.sh` does the same; see
+[docs/brev.md](docs/brev.md).
 
 Or from the command line:
 

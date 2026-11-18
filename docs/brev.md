@@ -5,7 +5,7 @@ installed, the prebuilt graph downloaded and the app running on port 8501.
 
 ## Deploy
 
-Open the VeriKG Launchable link, pick the instance and click **Deploy
+Open the [VeriKG Launchable](https://brev.nvidia.com/launchable/deploy?launchableID=env-3MHhl4Tzy8PWfQ8VoHZAuQdHdtW), pick the instance and click **Deploy
 Launchable**. When the instance is ready, open the secure link for port 8501.
 Setup takes about 5 minutes; the app log is `~/VeriKG/verikg_app.log`.
 
@@ -23,9 +23,12 @@ In the Brev console, **Launchables > Create Launchable**:
 1. **Files and runtime**: Git repository `https://github.com/Falehaqazi/VeriKG`, VM mode.
 2. **Setup script**: paste
    ```bash
-   #!/usr/bin/env bash
+   #!/bin/bash
    set -euo pipefail
-   bash "$HOME/VeriKG/brev/setup.sh"
+   export PIP_BREAK_SYSTEM_PACKAGES=1
+   cd "$HOME"
+   [ -d VeriKG ] || git clone https://github.com/Falehaqazi/VeriKG.git
+   bash VeriKG/brev/setup.sh
    ```
 3. **Networking**: expose port `8501` as a secure link named `verikg-app`. Jupyter on 8888 can stay on.
 4. **Compute**: any single GPU (an L4 or T4 is enough; the app itself runs on CPU).
