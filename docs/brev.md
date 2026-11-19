@@ -7,7 +7,7 @@ installed, the prebuilt graph downloaded and the app running on port 8501.
 
 Open the [VeriKG Launchable](https://brev.nvidia.com/launchable/deploy?launchableID=env-3MHhl4Tzy8PWfQ8VoHZAuQdHdtW), pick the instance and click **Deploy
 Launchable**. When the instance is ready, open the secure link for port 8501.
-Setup takes about 5 minutes; the app log is `~/VeriKG/verikg_app.log`.
+Setup takes about 25 minutes on a fresh L4 (the `verikg-app` button stays grey until the script finishes, and sign-in uses the NVIDIA account that deployed it); the app log is `~/VeriKG/verikg_app.log`.
 
 Optional setup values:
 
